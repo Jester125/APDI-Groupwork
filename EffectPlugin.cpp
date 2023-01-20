@@ -31,7 +31,7 @@ extern "C" {
             //  name,       type,              min, max, initial, size
             {   "Param 0",  Parameter::METER, 0.0, 1.0, 0.0, AUTO_SIZE  },
             {   "Param 1",  Parameter::METER, 0.0, 1.0, 0.0, AUTO_SIZE  },
-            {   "Gate Threshold dB",  Parameter::ROTARY, -100, 0, 0.0, AUTO_SIZE },
+            {   "Gate Threshold dB",  Parameter::ROTARY, 0, 1, 0.0, AUTO_SIZE },
             {   "Sustain",  Parameter::ROTARY, 0.0, 1.0, 0.0, AUTO_SIZE },
             {   "Reduction dB",  Parameter::ROTARY, 1.0, 25, 0.0, AUTO_SIZE  },
             {   "Decay",  Parameter::ROTARY, 1.0, 25, 0.0, AUTO_SIZE  },
@@ -93,10 +93,11 @@ void MyEffect::process(const float** inputBuffers, float** outputBuffers, int nu
     const float *pfInBuffer0 = inputBuffers[0], *pfInBuffer1 = inputBuffers[1];
     float *pfOutBuffer0 = outputBuffers[0], *pfOutBuffer1 = outputBuffers[1];
     
+    float fAval;
     float fAval0;
     float fAval1;
-    //float fMix;
-    float fFilteredMix0, fFilteredMix1;
+    float fMix;
+    float fFilteredMix;
     float fThreshDb(parameters[2]);
     float fThresh;
     float fThreshCubed;
@@ -119,98 +120,102 @@ void MyEffect::process(const float** inputBuffers, float** outputBuffers, int nu
         
         // Add your effect processing here
         
-        //fMix = fIn0 + fIn1 * 0.5;
+        fMix = fIn0 + fIn1 * 0.5;
         
         filter1.setCutoff(200);
         
-        fFilteredMix0 = filter1.tick(fIn0 * 0.5);
-        fFilteredMix1 = filter1.tick(fIn1 * 0.5);
+        fFilteredMix = filter1.tick(fMix);
         
-        fThresh =  pow(10, (fThreshDb / 100));
-        fReduction = 1 / (5*fReductionDb + 1);
+        fThresh =  fThreshDb; //pow(10, (fThreshDb / 100));
+        //fReduction = 1 / (5*fReductionDb + 1);
         //std::cout << (fThresh);
         //std::cout << (fThreshDB);
-        fGateRebound = 1 - fSustain;
+        //fGateRebound = 1 - fSustain;
         
         fThreshCubed = (fThresh * fThresh * fThresh);
         
-        fGateReboundCubed = (fGateRebound * fGateRebound * fGateRebound);
+        //fGateReboundCubed = (fGateRebound * fGateRebound * fGateRebound);
         
-        fAval0 = fabs(fFilteredMix0);
-        fAval1 = fabs(fFilteredMix1);
+        fAval = fabs(fFilteredMix);
+        fAval0 = fabs(fIn0);
+        fAval1 = fabs(fIn1);
        
         
-        if (fAval0 > fMax0 ) {
+        if (fAval > fMax ) {
             
-            fMax0 = fAval0;
+            fMax = fAval;
             
         }
         
-        if (fAval1 > fMax1 ) {
-                    
-            fMax1 = fAval1;
-                    
+        if (fAval0 > fMax0) {
+            fMax0 = fAval0;
         }
+        
+        if (fAval1 > fMax1) {
+            fMax1 = fAval1;
+        }
+        
        
         iMeasuredItems++;
         
         if (iMeasuredItems == iMeasuredLength){
             
             // if beyond the threshold...
-            if (fMax0 < (fThreshCubed + fGateReboundCubed) ){
+            if (fMax > fThreshCubed){
                 //bGateRebound = true; //not sure if i need the bool gate rebound or not
             
-                fOutMultiplier = (fOutMultiplier + 0.05 + fOutMultiplierOld * 0.95 * fReduction); // here ive added a little +0.05 just so that the multiplier doesnt remain on 0 when the code loops
-                std::cout << (fOutMultiplier);
+                fOutMultiplier = 1; //(fOutMultiplier + 0.05 + fOutMultiplierOld * 0.95); // here ive added a little +0.05 just so that the multiplier doesnt remain on 0 when the code loops
+                //std::cout << (fOutMultiplier);
                 
-                if (fOutMultiplier >= 1){
-                    fOutMultiplier = 1; // this limits the mult so i dont go deaf
-                }
+//                if (fOutMultiplier >= 1){
+//                    fOutMultiplier = 1; // this limits the mult so i dont go deaf
+//                }
             }
             
-            else if (fMax0 > fThreshCubed){
+            else if (fMax < fThreshCubed){
                 
-                fOutMultiplier = (fOutMultiplier - fOutMultiplierOld * 0.03);
+                fOutMultiplier = 0; //(fOutMultiplier - fOutMultiplierOld * 0.03);
                 
-                if (fOutMultiplier <= 0.05){
-                    fOutMultiplier = 0.05;
-                }
+                //if (fOutMultiplier <= 0.05){
+                //    fOutMultiplier = 0.05;
+                //}
                 //fOutMultiplier = 0.1;
-                bGateRebound = false;
+                //bGateRebound = false;
                 
             }
-            
+
             fMax0 = fMax0 * fOutMultiplier;
             fMax1 = fMax1 * fOutMultiplier;
-            
-            
+
+
             fMax0 = (fMax0 * 39 + 1);
             fMax1 = (fMax1 * 39 + 1);
-            
+
             fMax0 = log10(fMax0);
             fMax1 = log10(fMax1);
-            
+
             fMax0 = (fMax0 / log10(40));
             fMax1 = (fMax1 / log10(40));
 
-            
+
             if (fMax0 < fMaxOldL){
                 fMax0 = (fMax0 * 0.1 + fMaxOldL * 0.9);
-                
+
             }
             if (fMax1 < fMaxOldR){
                 fMax1 = (fMax1 * 0.1 + fMaxOldR * 0.9);
             }
-            
-            
+
+
             parameters[0] = fMax0;
             parameters[1] = fMax1;
-            
+
             fMaxOldL = fMax0;
             fMaxOldR = fMax1;
-            
+
             fMax0 = 0.f;
             fMax1 = 0.f;
+            fMax = 0;
             iMeasuredItems = 0;
             fOutMultiplierOld = fOutMultiplier;
         }
@@ -218,6 +223,8 @@ void MyEffect::process(const float** inputBuffers, float** outputBuffers, int nu
         
         fOut0 = fIn0 * fOutMultiplier;
         fOut1 = fIn1 * fOutMultiplier;
+        
+        
         
         // Copy result to output
         *pfOutBuffer0++ = fOut0;
