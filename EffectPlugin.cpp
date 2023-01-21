@@ -32,10 +32,7 @@ extern "C" {
             {   "Param 0",  Parameter::METER, 0.0, 1.0, 0.0, AUTO_SIZE  },
             {   "Param 1",  Parameter::METER, 0.0, 1.0, 0.0, AUTO_SIZE  },
             {   "Gate Threshold dB",  Parameter::ROTARY, 0, 1, 0.0, AUTO_SIZE },
-            {   "Sustain",  Parameter::ROTARY, 0.0, 1.0, 0.0, AUTO_SIZE },
-            {   "Reduction dB",  Parameter::ROTARY, 1.0, 25, 0.0, AUTO_SIZE  },
-            {   "Decay",  Parameter::ROTARY, 1.0, 25, 0.0, AUTO_SIZE  },
-
+            {   "Reduction dB",  Parameter::ROTARY, 0, 100, 0.0, AUTO_SIZE  },
         };
 
         const Presets PRESETS = {
@@ -101,11 +98,9 @@ void MyEffect::process(const float** inputBuffers, float** outputBuffers, int nu
     float fThreshDb(parameters[2]);
     float fThresh;
     float fThreshCubed;
-    float fSustain(parameters[3]);
     float fGateRebound;
     float fGateReboundCubed;
-    float fReductionDb(parameters[4]);
-    float fReduction;
+    float fReduction(parameters[3] / 100);
     bool bGateRebound = true;
 
     LPF filter1;
@@ -174,7 +169,7 @@ void MyEffect::process(const float** inputBuffers, float** outputBuffers, int nu
             
             else if (fMax < fThreshCubed){
                 
-                fOutMultiplier = 0; //(fOutMultiplier - fOutMultiplierOld * 0.03);
+                fOutMultiplier = 1 - fReduction; //(fOutMultiplier - fOutMultiplierOld * 0.03);
                 
                 //if (fOutMultiplier <= 0.05){
                 //    fOutMultiplier = 0.05;
