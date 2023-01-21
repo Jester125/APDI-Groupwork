@@ -32,9 +32,13 @@ extern "C" {
             {   "Param 0",  Parameter::METER, 0.0, 1.0, 0.0, AUTO_SIZE  },
             {   "Param 1",  Parameter::METER, 0.0, 1.0, 0.0, AUTO_SIZE  },
             {   "Gate Threshold dB",  Parameter::ROTARY, 0, 1, 0.0, AUTO_SIZE },
-            {   "Reduction dB",  Parameter::ROTARY, 0, 100, 0.0, AUTO_SIZE  },
+            {   "Reduction %",  Parameter::ROTARY, 0, 100, 0.0, AUTO_SIZE  },
+            {   "Gate Gain",  Parameter::ROTARY, 0, 2, 1, AUTO_SIZE  },
             {   "Delay Feedback",  Parameter::ROTARY, 0, 0.7, 0.0, AUTO_SIZE  },
             {   "Delay Time",  Parameter::ROTARY, 0.1, 0.8, 0.0, AUTO_SIZE  },
+            {   "Delay Dry %",  Parameter::ROTARY, 0, 100, 50, AUTO_SIZE  },
+            {   "Delay Wet %",  Parameter::ROTARY, 0, 200, 100, AUTO_SIZE  },
+            
         };
 
         const Presets PRESETS = {
@@ -105,8 +109,10 @@ void MyEffect::process(const float** inputBuffers, float** outputBuffers, int nu
     int iBufferReadPos;
     float fDelaySignal;
     float fDelayAmount;
-    float fDelayTime = (parameters[5] * 0.5);
+    float fDelayTime = (parameters[6] * 0.5);
     float fOut;
+    float fDry(parameters[7] / 100);
+    float fWet(parameters[8] / 100);
     
     float fAval;
     float fAval0;
@@ -119,6 +125,8 @@ void MyEffect::process(const float** inputBuffers, float** outputBuffers, int nu
     float fGateRebound;
     float fGateReboundCubed;
     float fReduction(parameters[3] / 100);
+    float fGateGain(parameters[4]);
+    float fDelayGain(parameters[7]);
     bool bGateRebound = true;
 
     LPF filter1;
@@ -212,11 +220,11 @@ void MyEffect::process(const float** inputBuffers, float** outputBuffers, int nu
 
 
             if (fMax0 < fMaxOldL){
-                fMax0 = (fMax0 * 0.1 + fMaxOldL * 0.9);
+                fMax0 = (fMax0 * 0.01 + fMaxOldL * 0.99);
 
             }
             if (fMax1 < fMaxOldR){
-                fMax1 = (fMax1 * 0.1 + fMaxOldR * 0.9);
+                fMax1 = (fMax1 * 0.01 + fMaxOldR * 0.99);
             }
 
 
@@ -244,11 +252,11 @@ void MyEffect::process(const float** inputBuffers, float** outputBuffers, int nu
         }
         fDelaySignal = pfCircularBuffer[iBufferReadPos];
                 
-        fDelayAmount = parameters[4];
+        fDelayAmount = parameters[5];
                 
         fDelaySignal = fDelaySignal * fDelayAmount;
                 
-        fOut = fMix + fDelaySignal;
+        fOut = (fMix * fDry) + (fDelaySignal * fWet);
                 
         pfCircularBuffer[iBufferWritePos] = fOut;
                 
@@ -260,11 +268,8 @@ void MyEffect::process(const float** inputBuffers, float** outputBuffers, int nu
                     
         }
         
-        
-        fOut0 = (fOut1 * fOutMultiplier) + fOut;
-        fOut1 = (fIn1 * fOutMultiplier) + fOut;
-        
-        
+        fOut0 = ((fOut1 * fOutMultiplier * fGateGain) + fOut) / 2;
+        fOut1 = ((fIn1 * fOutMultiplier * fGateGain) + fOut) / 2;
         
         // Copy result to output
         *pfOutBuffer0++ = fOut0;
