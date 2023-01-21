@@ -33,6 +33,8 @@ extern "C" {
             {   "Param 1",  Parameter::METER, 0.0, 1.0, 0.0, AUTO_SIZE  },
             {   "Gate Threshold dB",  Parameter::ROTARY, 0, 1, 0.0, AUTO_SIZE },
             {   "Reduction dB",  Parameter::ROTARY, 0, 100, 0.0, AUTO_SIZE  },
+            {   "Delay Feedback",  Parameter::ROTARY, 0, 0.7, 0.0, AUTO_SIZE  },
+            {   "Delay Time",  Parameter::ROTARY, 0.1, 0.8, 0.0, AUTO_SIZE  },
         };
 
         const Presets PRESETS = {
@@ -54,6 +56,14 @@ MyEffect::MyEffect(const Parameters& parameters, const Presets& presets)
     fMax0 = fMax1 = fMaxOldL = fMaxOldR = 0;
     fOutMultiplier = 0;
     fOutMultiplierOld = 0;
+    
+    iBufferSize = 2 * getSampleRate();
+        
+    pfCircularBuffer = new float[iBufferSize];
+    for(int x = 0; x < iBufferSize; x++)
+        pfCircularBuffer[x] = 0;
+        
+    iBufferWritePos = 0;
     
 }
 
@@ -89,6 +99,14 @@ void MyEffect::process(const float** inputBuffers, float** outputBuffers, int nu
     float fIn0, fIn1, fOut0 = 0, fOut1 = 0;
     const float *pfInBuffer0 = inputBuffers[0], *pfInBuffer1 = inputBuffers[1];
     float *pfOutBuffer0 = outputBuffers[0], *pfOutBuffer1 = outputBuffers[1];
+    
+    //for the delay
+    float fSR = getSampleRate();
+    int iBufferReadPos;
+    float fDelaySignal;
+    float fDelayAmount;
+    float fDelayTime = (parameters[5] * 0.5);
+    float fOut;
     
     float fAval;
     float fAval0;
@@ -215,9 +233,36 @@ void MyEffect::process(const float** inputBuffers, float** outputBuffers, int nu
             fOutMultiplierOld = fOutMultiplier;
         }
         
+        fMix = fIn0 + fIn1 * 0.5;
         
-        fOut0 = fIn0 * fOutMultiplier;
-        fOut1 = fIn1 * fOutMultiplier;
+        iBufferReadPos = iBufferWritePos - (fSR * fDelayTime);
+                
+        if (iBufferReadPos < 0 ){
+                    
+            iBufferReadPos  += iBufferSize;
+                    
+        }
+        fDelaySignal = pfCircularBuffer[iBufferReadPos];
+                
+        fDelayAmount = parameters[4];
+                
+        fDelaySignal = fDelaySignal * fDelayAmount;
+                
+        fOut = fMix + fDelaySignal;
+                
+        pfCircularBuffer[iBufferWritePos] = fOut;
+                
+        iBufferWritePos++;
+                
+        if (iBufferWritePos == iBufferSize - 1){
+                    
+            iBufferWritePos = 0;
+                    
+        }
+        
+        
+        fOut0 = (fOut1 * fOutMultiplier) + fOut;
+        fOut1 = (fIn1 * fOutMultiplier) + fOut;
         
         
         
