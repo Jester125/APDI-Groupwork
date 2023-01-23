@@ -30,18 +30,19 @@ extern "C" {
         
         const Parameters CONTROLS = {
             //  name,       type,              min, max, initial, size
-            {   "Param 0",  Parameter::METER, 0.0, 0.2, 0.0, AUTO_SIZE  },
-            {   "Param 1",  Parameter::METER, 0.0, 1.0, 0.0, AUTO_SIZE  },
-            {   "Gate Threshold (dB)",  Parameter::ROTARY, -100, 0, -100, AUTO_SIZE },
-            {   "Hysteresis (dB)",  Parameter::ROTARY, -20, 0, 0.0, AUTO_SIZE },
-            {   "Attack (ms)",  Parameter::ROTARY, 0, 100, 0.0, AUTO_SIZE },
-            {   "Release (ms)",  Parameter::ROTARY, 0, 100, 0.0, AUTO_SIZE },
-            {   "Reduction (dB)",  Parameter::ROTARY, -100, 0, 0.0, AUTO_SIZE },
-            {   "Filter Type",  Parameter::MENU, {"BandPass", "LowPass", "HighPass"}, AUTO_SIZE },
-            {   "LFP Cutoff (Hz)",  Parameter::ROTARY, 100, 10000, 0.0, AUTO_SIZE },
-            {   "HPF Cutoff (Hz)",  Parameter::ROTARY, 20, 20000, 0.0, AUTO_SIZE },
-            {   "BandPass High Cutoff (Hz)",  Parameter::ROTARY, 200, 20000, 0.0, AUTO_SIZE },
-            {   "BandPass Low Cutoff (Hz)",  Parameter::ROTARY, 100, 10000, 0.0, AUTO_SIZE },
+            {   "Param 0",  Parameter::METER, 0.0, 0.2, 0.0, AUTO_SIZE  }, //0
+            {   "Param 1",  Parameter::METER, 0.0, 1.0, 0.0, AUTO_SIZE  }, //1
+            {   "Gate Threshold (dB)",  Parameter::ROTARY, -100, 0, -100, AUTO_SIZE }, //2
+            {   "Hysteresis (dB)",  Parameter::ROTARY, -20, 0, 0.0, AUTO_SIZE }, //3
+            {   "Attack (ms)",  Parameter::ROTARY, 0, 100, 0.0, AUTO_SIZE },//4
+            {   "Release (ms)",  Parameter::ROTARY, 0, 100, 0.0, AUTO_SIZE },//5
+            {   "Lookahead",  Parameter::ROTARY, -20, 0, 0.0, AUTO_SIZE },//6
+            {   "Reduction (dB)",  Parameter::ROTARY, -100, 0, -100, AUTO_SIZE },//7
+            {   "Filter Type",  Parameter::MENU, {"BandPass", "LowPass", "HighPass"}, AUTO_SIZE },//8
+            {   "LFP Cutoff (Hz)",  Parameter::ROTARY, 200, 1000, 200, AUTO_SIZE },//9
+            {   "HPF Cutoff (Hz)",  Parameter::ROTARY, 1000, 20000, 1000, AUTO_SIZE },//10
+            {   "BandPass Center (Hz)",  Parameter::ROTARY, 200, 20000, 200, AUTO_SIZE },//11
+            {   "BandPass Bandwidth (Hz)",  Parameter::ROTARY, 100, 10000, 100, AUTO_SIZE },//12
 
         };
 
@@ -64,7 +65,6 @@ MyEffect::MyEffect(const Parameters& parameters, const Presets& presets)
     fMax0 = fMax1 = fMaxOldL = fMaxOldR = 0;
     fOutMultiplier = 0;
     fOutMultiplierOld = 0;
-
     
 }
 
@@ -84,24 +84,24 @@ void MyEffect::presetLoaded(int iPresetNum, const char *sPresetName)
 
 void MyEffect::optionChanged(int iOptionMenu, int iItem)
 {
-    
     //here im trying to reference the options in the dropdown menu for parameters[8] but have no clue, have emailed chris
-    iOptionMenu = parameters[8];
-    if (iItem == 0){
-        bBandPass = true;
-        bLowPass = false;
-        bHighPass = false;
-    }
-    if (iItem == 1){
-        bBandPass = false;
-        bLowPass = true;
-        bHighPass = false;
-    }
-    if (iItem == 2){
-        bBandPass = false;
-        bLowPass = false;
-        bHighPass = true;
-    }
+       iOptionMenu = parameters[8];
+       if (iItem == 0){
+           bBandPass = true;
+           bLowPass = false;
+           bHighPass = false;
+       }
+       if (iItem == 1){
+           bBandPass = false;
+           bLowPass = true;
+           bHighPass = false;
+       }
+       if (iItem == 2){
+           bBandPass = false;
+           bLowPass = false;
+           bHighPass = true;
+       }
+
     // An option menu, with index iOptionMenu, has been changed to the entry, iItem
 }
 
@@ -138,7 +138,7 @@ void MyEffect::process(const float** inputBuffers, float** outputBuffers, int nu
 
     LPF filterlpf;
     HPF filterhpf;
-    BPF filterbpf; //gonna try to make a menu where you can select the type of filtering that gets passed to the aval, with controls for the frequency cutoff, and for the bandpass with controls for the center frequency and bandwidth
+    BPF filterbpf;
     
      
     //float fGain = parameters[0];
@@ -153,39 +153,37 @@ void MyEffect::process(const float** inputBuffers, float** outputBuffers, int nu
         
         fMix = fIn0 + fIn1 * 0.5;
         
-        if (bLowPass == true){
+        filterlpf.setCutoff(parameters[9]);
+        
+        filterhpf.setCutoff(parameters[10]);
+        
+        filterbpf.set(parameters[11], parameters[12]);
             
-            filterlpf.setCutoff(parameters[9]);
-            
+        if (bLowPass == true) {
             fFilteredMix = filterlpf.tick(fMix);
         }
-        if (bHighPass == true){
-            filterhpf.setCutoff(parameters[10]);
-            
+        if (bHighPass == true) {
             fFilteredMix = filterhpf.tick(fMix);
         }
         if (bBandPass == true) {
-            filterbpf.set(parameters[11], parameters[12]);
-            
             fFilteredMix = filterbpf.tick(fMix);
-            
         }
         
-        fThreshRec = (fThresh + 100) / 100; //takes -100 - 1 and converts to a range of 0 - 1
+        fThreshRec = (fThresh + 100) / 100;
         
         //fGateReboundRec = (fGateRebound + 20) / 100;
         
-        fGateReboundRec = fabs(fGateRebound) / 100; //converts -20 - 0 to a range of 0.2 - 0
+        fGateReboundRec = fabs(fGateRebound) / 100;
         
-        //parameters[0] = fGateReboundRec;
+        parameters[0] = fGateReboundRec;
         
-        fReductionAmountRec = (fReductionAmount + 100) / 100; //rectifies -100 - 0 to 1 - 0
+        fReductionAmountRec = (fReductionAmount + 100) / 100;
         
         fAval0 = fabs(fFilteredMix);
         
-        fAval0 = 20 * log10(fAval0) + 100; //converts the aval envelope follower to log scale
+        fAval0 = 20 * log10(fAval0) + 100;
         
-        fAval0 = fAval0 / 100; // converts log scale to a range of 0 - 1
+        fAval0 = fAval0 / 100;
        
         
         if (fAval0 > fMax0 ) {
@@ -199,20 +197,20 @@ void MyEffect::process(const float** inputBuffers, float** outputBuffers, int nu
         if (iMeasuredItems == iMeasuredLength){
             
             if (fMax0 > (fThreshRec) ){
-                //removed hysteresis code to the closing of the gate after reading online it gets considered when gate closes not opens
+                //bGateRebound = true; //not sure if i need the bool gate rebound or not
             
-                fOutMultiplier = (fOutMultiplier + rampUp(fAttack)); //see the function in .h
+                fOutMultiplier = (fOutMultiplier + rampUp(fAttack)); // here ive added a little +0.05 just so that the multiplier doesnt remain on 0 when the code loops back round
                 
                 if (fOutMultiplier >= 1){
                     fOutMultiplier = 1; // this limits the mult so i dont go deaf
                     
-                    //gState = true;  i was gonna add a led that shows if the gate is on or off using this variable but the nasher didnt include one in the parameters
+                    gState = true;
                 }
             }
             
-            else if (fMax0 < fThreshRec - fGateReboundRec){ //this means that the level must fall below the threshold - the hysteresis e.g. threshold at -20 db and hysteresis - 3 db means the level has to fall below -23db for the gate to close
+            else if (fMax0 < fThreshRec - fGateReboundRec){
                 
-                fOutMultiplier = (fOutMultiplier - rampDown(fRelease)); // same as above but subtracting instead
+                fOutMultiplier = (fOutMultiplier - rampDown(fRelease));
                 
                 if (fOutMultiplier <= fReductionAmountRec){
                     fOutMultiplier = fReductionAmountRec;
@@ -241,5 +239,6 @@ void MyEffect::process(const float** inputBuffers, float** outputBuffers, int nu
         *pfOutBuffer1++ = fOut1;
     }
 }
+
 
 
