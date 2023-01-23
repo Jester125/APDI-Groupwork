@@ -1,3 +1,4 @@
+
 //
 //  EffectPlugin.cpp
 //  MyEffect Plugin Source Code
@@ -29,16 +30,19 @@ extern "C" {
         
         const Parameters CONTROLS = {
             //  name,       type,              min, max, initial, size
-            {   "Param 0",  Parameter::METER, 0.0, 1.0, 0.0, AUTO_SIZE  },
+            {   "Param 0",  Parameter::METER, 0.0, 0.2, 0.0, AUTO_SIZE  },
             {   "Param 1",  Parameter::METER, 0.0, 1.0, 0.0, AUTO_SIZE  },
-            {   "Gate Threshold dB",  Parameter::ROTARY, 0, 1, 0.0, AUTO_SIZE },
-            {   "Reduction %",  Parameter::ROTARY, 0, 100, 0.0, AUTO_SIZE  },
-            {   "Gate Gain",  Parameter::ROTARY, 0, 2, 1, AUTO_SIZE  },
-            {   "Delay Feedback",  Parameter::ROTARY, 0, 0.7, 0.0, AUTO_SIZE  },
-            {   "Delay Time",  Parameter::ROTARY, 0.1, 0.8, 0.0, AUTO_SIZE  },
-            {   "Delay Dry %",  Parameter::ROTARY, 0, 100, 50, AUTO_SIZE  },
-            {   "Delay Wet %",  Parameter::ROTARY, 0, 200, 100, AUTO_SIZE  },
-            
+            {   "Gate Threshold (dB)",  Parameter::ROTARY, -100, 0, -100, AUTO_SIZE },
+            {   "Hysteresis (dB)",  Parameter::ROTARY, -20, 0, 0.0, AUTO_SIZE },
+            {   "Attack (ms)",  Parameter::ROTARY, 0, 100, 0.0, AUTO_SIZE },
+            {   "Release (ms)",  Parameter::ROTARY, 0, 100, 0.0, AUTO_SIZE },
+            {   "Reduction (dB)",  Parameter::ROTARY, -100, 0, 0.0, AUTO_SIZE },
+            {   "Filter Type",  Parameter::MENU, {"BandPass", "LowPass", "HighPass"}, AUTO_SIZE },
+            {   "LFP Cutoff (Hz)",  Parameter::ROTARY, 100, 10000, 0.0, AUTO_SIZE },
+            {   "HPF Cutoff (Hz)",  Parameter::ROTARY, 20, 20000, 0.0, AUTO_SIZE },
+            {   "BandPass High Cutoff (Hz)",  Parameter::ROTARY, 200, 20000, 0.0, AUTO_SIZE },
+            {   "BandPass Low Cutoff (Hz)",  Parameter::ROTARY, 100, 10000, 0.0, AUTO_SIZE },
+
         };
 
         const Presets PRESETS = {
@@ -60,14 +64,7 @@ MyEffect::MyEffect(const Parameters& parameters, const Presets& presets)
     fMax0 = fMax1 = fMaxOldL = fMaxOldR = 0;
     fOutMultiplier = 0;
     fOutMultiplierOld = 0;
-    
-    iBufferSize = 2 * getSampleRate();
-        
-    pfCircularBuffer = new float[iBufferSize];
-    for(int x = 0; x < iBufferSize; x++)
-        pfCircularBuffer[x] = 0;
-        
-    iBufferWritePos = 0;
+
     
 }
 
@@ -87,6 +84,24 @@ void MyEffect::presetLoaded(int iPresetNum, const char *sPresetName)
 
 void MyEffect::optionChanged(int iOptionMenu, int iItem)
 {
+    
+    //here im trying to reference the options in the dropdown menu for parameters[8] but have no clue, have emailed chris
+    iOptionMenu = parameters[8];
+    if (iItem == 0){
+        bBandPass = true;
+        bLowPass = false;
+        bHighPass = false;
+    }
+    if (iItem == 1){
+        bBandPass = false;
+        bLowPass = true;
+        bHighPass = false;
+    }
+    if (iItem == 2){
+        bBandPass = false;
+        bLowPass = false;
+        bHighPass = true;
+    }
     // An option menu, with index iOptionMenu, has been changed to the entry, iItem
 }
 
@@ -104,32 +119,27 @@ void MyEffect::process(const float** inputBuffers, float** outputBuffers, int nu
     const float *pfInBuffer0 = inputBuffers[0], *pfInBuffer1 = inputBuffers[1];
     float *pfOutBuffer0 = outputBuffers[0], *pfOutBuffer1 = outputBuffers[1];
     
-    //for the delay
-    float fSR = getSampleRate();
-    int iBufferReadPos;
-    float fDelaySignal;
-    float fDelayAmount;
-    float fDelayTime = (parameters[6] * 0.5);
-    float fOut;
-    float fDry(parameters[7] / 100);
-    float fWet(parameters[8] / 100);
-    
-    float fAval;
     float fAval0;
-    float fAval1;
+    //float fAval1;
     float fMix;
     float fFilteredMix;
-    float fThreshDb(parameters[2]);
-    float fThresh;
-    float fThreshCubed;
-    float fGateRebound;
-    float fGateReboundCubed;
-    float fReduction(parameters[3] / 100);
-    float fGateGain(parameters[4]);
-    float fDelayGain(parameters[7]);
-    bool bGateRebound = true;
+    float fThresh(parameters[2]);
+    float fThreshRec;
+    //float fThreshCubed;
+    float fGateRebound(parameters[3]);
+    float fGateReboundRec;
+    bool gState;
+    float fReductionAmount(parameters[7]);
+    float fReductionAmountRec;
+    float fAttack(parameters[4]);
+    float fRelease(parameters[5]);
+    //float fGateReboundCubed;
+    //bool bGateRebound = true;
 
-    LPF filter1;
+    LPF filterlpf;
+    HPF filterhpf;
+    BPF filterbpf; //gonna try to make a menu where you can select the type of filtering that gets passed to the aval, with controls for the frequency cutoff, and for the bandpass with controls for the center frequency and bandwidth
+    
      
     //float fGain = parameters[0];
     
@@ -143,136 +153,93 @@ void MyEffect::process(const float** inputBuffers, float** outputBuffers, int nu
         
         fMix = fIn0 + fIn1 * 0.5;
         
-        filter1.setCutoff(200);
+        if (bLowPass == true){
+            
+            filterlpf.setCutoff(parameters[9]);
+            
+            fFilteredMix = filterlpf.tick(fMix);
+        }
+        if (bHighPass == true){
+            filterhpf.setCutoff(parameters[10]);
+            
+            fFilteredMix = filterhpf.tick(fMix);
+        }
+        if (bBandPass == true) {
+            filterbpf.set(parameters[11], parameters[12]);
+            
+            fFilteredMix = filterbpf.tick(fMix);
+            
+        }
         
-        fFilteredMix = filter1.tick(fMix);
+        fThreshRec = (fThresh + 100) / 100; //takes -100 - 1 and converts to a range of 0 - 1
         
-        fThresh =  fThreshDb; //pow(10, (fThreshDb / 100));
-        //fReduction = 1 / (5*fReductionDb + 1);
-        //std::cout << (fThresh);
-        //std::cout << (fThreshDB);
-        //fGateRebound = 1 - fSustain;
+        //fGateReboundRec = (fGateRebound + 20) / 100;
         
-        fThreshCubed = (fThresh * fThresh * fThresh);
+        fGateReboundRec = fabs(fGateRebound) / 100; //converts -20 - 0 to a range of 0.2 - 0
         
-        //fGateReboundCubed = (fGateRebound * fGateRebound * fGateRebound);
+        //parameters[0] = fGateReboundRec;
         
-        fAval = fabs(fFilteredMix);
-        fAval0 = fabs(fIn0);
-        fAval1 = fabs(fIn1);
+        fReductionAmountRec = (fReductionAmount + 100) / 100; //rectifies -100 - 0 to 1 - 0
+        
+        fAval0 = fabs(fFilteredMix);
+        
+        fAval0 = 20 * log10(fAval0) + 100; //converts the aval envelope follower to log scale
+        
+        fAval0 = fAval0 / 100; // converts log scale to a range of 0 - 1
        
         
-        if (fAval > fMax ) {
+        if (fAval0 > fMax0 ) {
             
-            fMax = fAval;
-            
-        }
-        
-        if (fAval0 > fMax0) {
             fMax0 = fAval0;
+            
         }
-        
-        if (fAval1 > fMax1) {
-            fMax1 = fAval1;
-        }
-        
        
         iMeasuredItems++;
         
         if (iMeasuredItems == iMeasuredLength){
             
-            // if beyond the threshold...
-            if (fMax > fThreshCubed){
-                //bGateRebound = true; //not sure if i need the bool gate rebound or not
+            if (fMax0 > (fThreshRec) ){
+                //removed hysteresis code to the closing of the gate after reading online it gets considered when gate closes not opens
             
-                fOutMultiplier = 1; //(fOutMultiplier + 0.05 + fOutMultiplierOld * 0.95); // here ive added a little +0.05 just so that the multiplier doesnt remain on 0 when the code loops
-                //std::cout << (fOutMultiplier);
+                fOutMultiplier = (fOutMultiplier + rampUp(fAttack)); //see the function in .h
                 
-//                if (fOutMultiplier >= 1){
-//                    fOutMultiplier = 1; // this limits the mult so i dont go deaf
-//                }
+                if (fOutMultiplier >= 1){
+                    fOutMultiplier = 1; // this limits the mult so i dont go deaf
+                    
+                    //gState = true;  i was gonna add a led that shows if the gate is on or off using this variable but the nasher didnt include one in the parameters
+                }
             }
             
-            else if (fMax < fThreshCubed){
+            else if (fMax0 < fThreshRec - fGateReboundRec){ //this means that the level must fall below the threshold - the hysteresis e.g. threshold at -20 db and hysteresis - 3 db means the level has to fall below -23db for the gate to close
                 
-                fOutMultiplier = 1 - fReduction; //(fOutMultiplier - fOutMultiplierOld * 0.03);
+                fOutMultiplier = (fOutMultiplier - rampDown(fRelease)); // same as above but subtracting instead
                 
-                //if (fOutMultiplier <= 0.05){
-                //    fOutMultiplier = 0.05;
-                //}
+                if (fOutMultiplier <= fReductionAmountRec){
+                    fOutMultiplier = fReductionAmountRec;
+                    
+                    gState = false;
+                }
                 //fOutMultiplier = 0.1;
                 //bGateRebound = false;
                 
             }
-
-            fMax0 = fMax0 * fOutMultiplier;
-            fMax1 = fMax1 * fOutMultiplier;
-
-
-            fMax0 = (fMax0 * 39 + 1);
-            fMax1 = (fMax1 * 39 + 1);
-
-            fMax0 = log10(fMax0);
-            fMax1 = log10(fMax1);
-
-            fMax0 = (fMax0 / log10(40));
-            fMax1 = (fMax1 / log10(40));
-
-
-            if (fMax0 < fMaxOldL){
-                fMax0 = (fMax0 * 0.01 + fMaxOldL * 0.99);
-
-            }
-            if (fMax1 < fMaxOldR){
-                fMax1 = (fMax1 * 0.01 + fMaxOldR * 0.99);
-            }
-
-
-            parameters[0] = fMax0;
-            parameters[1] = fMax1;
-
-            fMaxOldL = fMax0;
-            fMaxOldR = fMax1;
-
+            
+            
             fMax0 = 0.f;
-            fMax1 = 0.f;
-            fMax = 0;
             iMeasuredItems = 0;
             fOutMultiplierOld = fOutMultiplier;
         }
         
-        fMix = fIn0 + fIn1 * 0.5;
+        fMix = fMix * fOutMultiplier;
         
-        iBufferReadPos = iBufferWritePos - (fSR * fDelayTime);
-                
-        if (iBufferReadPos < 0 ){
-                    
-            iBufferReadPos  += iBufferSize;
-                    
-        }
-        fDelaySignal = pfCircularBuffer[iBufferReadPos];
-                
-        fDelayAmount = parameters[5];
-                
-        fDelaySignal = fDelaySignal * fDelayAmount;
-                
-        fOut = (fMix * fDry) + (fDelaySignal * fWet);
-                
-        pfCircularBuffer[iBufferWritePos] = fOut;
-                
-        iBufferWritePos++;
-                
-        if (iBufferWritePos == iBufferSize - 1){
-                    
-            iBufferWritePos = 0;
-                    
-        }
         
-        fOut0 = ((fOut1 * fOutMultiplier * fGateGain) + fOut) / 2;
-        fOut1 = ((fIn1 * fOutMultiplier * fGateGain) + fOut) / 2;
+        fOut0 = fMix;
+        fOut1 = fMix;
         
         // Copy result to output
         *pfOutBuffer0++ = fOut0;
         *pfOutBuffer1++ = fOut1;
     }
 }
+
+
