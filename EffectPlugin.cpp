@@ -1,4 +1,3 @@
-
 //
 //  EffectPlugin.cpp
 //  MyEffect Plugin Source Code
@@ -30,7 +29,7 @@ extern "C" {
         
         const Parameters CONTROLS = {
             //  name,       type,              min, max, initial, size
-            {   "Param 0",  Parameter::METER, 0.0, 0.2, 0.0, AUTO_SIZE  }, //0
+            {   "Param 0",  Parameter::METER, 0.0, 1.0, 0.0, AUTO_SIZE  }, //0
             {   "Param 1",  Parameter::METER, 0.0, 1.0, 0.0, AUTO_SIZE  }, //1
             {   "Gate Threshold (dB)",  Parameter::ROTARY, -100, 0, -100, AUTO_SIZE }, //2
             {   "Hysteresis (dB)",  Parameter::ROTARY, -20, 0, 0.0, AUTO_SIZE }, //3
@@ -43,6 +42,11 @@ extern "C" {
             {   "HPF Cutoff (Hz)",  Parameter::ROTARY, 1000, 20000, 1000, AUTO_SIZE },//10
             {   "BandPass Center (Hz)",  Parameter::ROTARY, 200, 20000, 200, AUTO_SIZE },//11
             {   "BandPass Bandwidth (Hz)",  Parameter::ROTARY, 100, 10000, 100, AUTO_SIZE },//12
+            {   "Delay Feedback",  Parameter::ROTARY, 0, 0.7, 0.0, AUTO_SIZE  },//13
+            {   "Delay Time",  Parameter::ROTARY, 0.1, 0.8, 0.0, AUTO_SIZE  },//14
+            {   "Delay Dry %",  Parameter::ROTARY, 0, 100, 50, AUTO_SIZE  },//15
+            {   "Delay Wet %",  Parameter::ROTARY, 0, 200, 100, AUTO_SIZE  },//16
+            //{   "Only when gate is closed",  Parameter::BUTTON, 0, 1, 0, AUTO_SIZE  },//17
 
         };
 
@@ -65,6 +69,14 @@ MyEffect::MyEffect(const Parameters& parameters, const Presets& presets)
     fMax0 = fMax1 = fMaxOldL = fMaxOldR = 0;
     fOutMultiplier = 0;
     fOutMultiplierOld = 0;
+    
+    iBufferSize = 2 * getSampleRate();
+            
+    pfCircularBuffer = new float[iBufferSize];
+    for(int x = 0; x < iBufferSize; x++)
+        pfCircularBuffer[x] = 0;
+            
+    iBufferWritePos = 0;
     
 }
 
@@ -108,6 +120,13 @@ void MyEffect::optionChanged(int iOptionMenu, int iItem)
 void MyEffect::buttonPressed(int iButton)
 {
     // A button, with index iButton, has been pressed
+//    iButton = parameters[16];
+//    if (bDelayisOn) {
+//        bDelayisOn = false;
+//    }
+//    else {
+//        bDelayisOn = true;
+//    }
 }
 
 // Applies audio processing to a buffer of audio
@@ -120,7 +139,8 @@ void MyEffect::process(const float** inputBuffers, float** outputBuffers, int nu
     float *pfOutBuffer0 = outputBuffers[0], *pfOutBuffer1 = outputBuffers[1];
     
     float fAval0;
-    //float fAval1;
+    float fAval1;
+    float fAval;
     float fMix;
     float fFilteredMix;
     float fThresh(parameters[2]);
@@ -140,6 +160,17 @@ void MyEffect::process(const float** inputBuffers, float** outputBuffers, int nu
     HPF filterhpf;
     BPF filterbpf;
     
+    //for the delay
+    float fSR = getSampleRate();
+    int iBufferReadPos;
+    float fDelaySignal;
+    float fDelayAmount;
+    float fDelayTime = (parameters[14] * 0.5);
+    float fOut;
+    float fDry(parameters[15] / 100);
+    float fWet(parameters[16] / 100);
+    
+
      
     //float fGain = parameters[0];
     
@@ -179,16 +210,30 @@ void MyEffect::process(const float** inputBuffers, float** outputBuffers, int nu
         
         fReductionAmountRec = (fReductionAmount + 100) / 100;
         
-        fAval0 = fabs(fFilteredMix);
+        fAval = fabs(fFilteredMix);
+        fAval0 = fabs(fIn0);
+        fAval1 = fabs(fIn1);
         
-        fAval0 = 20 * log10(fAval0) + 100;
+        fAval = 20 * log10(fAval) + 100;
         
-        fAval0 = fAval0 / 100;
+        fAval = fAval / 100;
        
+        //peak detection for the noise gate
+        if (fAval > fMax ) {
+            
+            fMax = fAval;
+            
+        }
         
+        //peak detction for the metering
         if (fAval0 > fMax0 ) {
             
             fMax0 = fAval0;
+            
+        }
+        if (fAval1 > fMax1 ) {
+            
+            fMax1 = fAval1;
             
         }
        
@@ -196,7 +241,7 @@ void MyEffect::process(const float** inputBuffers, float** outputBuffers, int nu
         
         if (iMeasuredItems == iMeasuredLength){
             
-            if (fMax0 > (fThreshRec) ){
+            if (fMax > (fThreshRec) ){
                 //bGateRebound = true; //not sure if i need the bool gate rebound or not
             
                 fOutMultiplier = (fOutMultiplier + rampUp(fAttack)); // here ive added a little +0.05 just so that the multiplier doesnt remain on 0 when the code loops back round
@@ -208,7 +253,7 @@ void MyEffect::process(const float** inputBuffers, float** outputBuffers, int nu
                 }
             }
             
-            else if (fMax0 < fThreshRec - fGateReboundRec){
+            else if (fMax < fThreshRec - fGateReboundRec){
                 
                 fOutMultiplier = (fOutMultiplier - rampDown(fRelease));
                 
@@ -222,23 +267,77 @@ void MyEffect::process(const float** inputBuffers, float** outputBuffers, int nu
                 
             }
             
+            //Code for making the metering look nice
+            fMax0 = fMax0 * fOutMultiplier;
+            fMax1 = fMax1 * fOutMultiplier;
+
+
+            fMax0 = (fMax0 * 39 + 1);
+            fMax1 = (fMax1 * 39 + 1);
+
+            fMax0 = log10(fMax0);
+            fMax1 = log10(fMax1);
+
+            fMax0 = (fMax0 / log10(40));
+            fMax1 = (fMax1 / log10(40));
+
+            //Making the slow decay
+            if (fMax0 < fMaxOldL){
+                fMax0 = (fMax0 * 0.01 + fMaxOldL * 0.99);
+
+            }
+            if (fMax1 < fMaxOldR){
+                fMax1 = (fMax1 * 0.01 + fMaxOldR * 0.99);
+            }
+
             
+            parameters[0] = fMax0;
+            parameters[1] = fMax1;
+
+            fMaxOldL = fMax0;
+            fMaxOldR = fMax1;
+
             fMax0 = 0.f;
+            fMax1 = 0.f;
+            fMax = 0;
             iMeasuredItems = 0;
             fOutMultiplierOld = fOutMultiplier;
         }
         
-        fMix = fMix * fOutMultiplier;
+        //Code for the delay
+        fMix = fIn0 + fIn1 * 0.5;
+                
+        iBufferReadPos = iBufferWritePos - (fSR * fDelayTime);
+                
+        if (iBufferReadPos < 0 ){
+                            
+            iBufferReadPos  += iBufferSize;
+                            
+        }
+        fDelaySignal = pfCircularBuffer[iBufferReadPos];
+                        
+        fDelayAmount = parameters[13];
+                        
+        fDelaySignal = fDelaySignal * fDelayAmount;
         
+        //adding wet and dry
+        fOut = (fMix * fDry) + (fDelaySignal * fWet);
+                        
+        pfCircularBuffer[iBufferWritePos] = fOut;
+                        
+        iBufferWritePos++;
+                        
+        if (iBufferWritePos == iBufferSize - 1){
+                            
+            iBufferWritePos = 0;
+                            
+        }
         
-        fOut0 = fMix;
-        fOut1 = fMix;
+        fOut0 = ((fIn1 * fOutMultiplier) + fOut) / 2;
+        fOut1 = ((fIn1 * fOutMultiplier) + fOut) / 2;
         
         // Copy result to output
         *pfOutBuffer0++ = fOut0;
         *pfOutBuffer1++ = fOut1;
     }
 }
-
-
-
